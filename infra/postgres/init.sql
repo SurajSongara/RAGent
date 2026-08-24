@@ -1,7 +1,13 @@
 -- RAGent :: system of record
--- Design rule: every generated sentence must be traceable to a pixel region of a
--- source page. That chain is documents -> pages -> blocks(bbox) -> chunk_blocks -> chunks.
--- Nothing in the pipeline is allowed to break a link in it.
+-- Design rule: every generated sentence must be traceable back to its exact
+-- location in the source. That chain is
+--     documents -> pages -> blocks -> chunk_blocks -> chunks -> citations
+-- and nothing in the pipeline may break a link in it.
+--
+-- A block locates itself one of two ways depending on the source format:
+--   paged (pdf, images, converted office docs) -> page_no + normalised bbox
+--   flow  (markdown, csv, plain text)          -> character offsets
+-- The block_is_locatable constraint enforces that it does one or the other.
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS unaccent;
@@ -12,6 +18,12 @@ CREATE TYPE doc_status   AS ENUM ('pending','processing','ready','failed','quara
 CREATE TYPE stage_status AS ENUM ('pending','running','succeeded','failed','skipped');
 CREATE TYPE block_kind   AS ENUM ('title','heading','paragraph','list','table','figure','caption','footnote','header','footer','page_number');
 CREATE TYPE text_origin  AS ENUM ('native','ocr','vlm');
+CREATE TYPE format_family   AS ENUM ('pdf','image','office','web','flow');
+-- How a citation resolves back to its source. Paged documents highlight a
+-- pixel region; flow documents have no geometry, so they carry character
+-- offsets instead. Two honest modes beat one that fabricates bounding
+-- boxes for a Markdown file.
+CREATE TYPE provenance_mode AS ENUM ('paged','flow');
 
 -- ---------------------------------------------------------------- documents
 
@@ -20,12 +32,18 @@ CREATE TABLE documents (
     tenant_id       TEXT        NOT NULL DEFAULT 'default',
     -- content hash is the dedupe key: re-uploading the same filing is a no-op
     sha256          CHAR(64)    NOT NULL,
-    source_uri      TEXT        NOT NULL,          -- s3://raw/<sha256>.pdf
+    source_uri      TEXT        NOT NULL,          -- s3://raw/<sha256>.<ext>
     original_name   TEXT        NOT NULL,
     mime_type       TEXT        NOT NULL,
     byte_size       BIGINT      NOT NULL,
     page_count      INT,
     status          doc_status  NOT NULL DEFAULT 'pending',
+
+    -- Set by the detect stage from magic bytes, never from the extension.
+    format_family   format_family,
+    provenance      provenance_mode,
+    -- Office and HTML render to PDF before parsing; this is that artefact.
+    converted_uri   TEXT,
 
     -- EDGAR / filing metadata. Doubles as the Qdrant payload filter set, so
     -- "compare FY24 vs FY25 for CIK X" is a filtered vector search, not a rerank hack.
@@ -65,7 +83,8 @@ CREATE TABLE ingest_runs (
 CREATE TABLE ingest_stages (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id       UUID NOT NULL REFERENCES ingest_runs(id) ON DELETE CASCADE,
-    stage        TEXT NOT NULL,      -- classify|parse|ocr|tables|figures|chunk|contextualize|embed
+    -- detect|convert|parse|parse_flow|ocr|tables|figures|chunk|contextualize|embed
+    stage        TEXT NOT NULL,
     status       stage_status NOT NULL DEFAULT 'pending',
     attempt      INT NOT NULL DEFAULT 0,
     started_at   TIMESTAMPTZ,
@@ -100,17 +119,34 @@ CREATE TABLE pages (
 CREATE TABLE blocks (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id    UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    page_id        UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-    page_no        INT  NOT NULL,
+    -- NULL for flow documents (markdown, csv, plain text): they have no pages.
+    page_id        UUID REFERENCES pages(id) ON DELETE CASCADE,
+    page_no        INT,
     reading_order  INT  NOT NULL,                  -- resolved across columns
     kind           block_kind  NOT NULL,
     origin         text_origin NOT NULL,
     confidence     REAL,
-    x0 REAL NOT NULL, y0 REAL NOT NULL, x1 REAL NOT NULL, y1 REAL NOT NULL,
+
+    -- Paged provenance: normalised 0..1 bbox on the rendered page.
+    x0 REAL, y0 REAL, x1 REAL, y1 REAL,
+    -- Flow provenance: character offsets into the extracted text.
+    char_start INT, char_end INT,
+
     text           TEXT NOT NULL,
     -- heading trail at this point in the doc, e.g. {"Part II","Item 7","Liquidity"}
     section_path   TEXT[] NOT NULL DEFAULT '{}',
-    CONSTRAINT bbox_normalised CHECK (x0 >= 0 AND y0 >= 0 AND x1 <= 1 AND y1 <= 1 AND x1 > x0 AND y1 > y0)
+
+    CONSTRAINT bbox_normalised CHECK (
+        x0 IS NULL OR (x0 >= 0 AND y0 >= 0 AND x1 <= 1 AND y1 <= 1 AND x1 > x0 AND y1 > y0)
+    ),
+    CONSTRAINT char_range_valid CHECK (
+        char_start IS NULL OR (char_start >= 0 AND char_end > char_start)
+    ),
+    -- Every block must be locatable one way or the other. This is the invariant
+    -- that keeps citations resolvable across every supported format.
+    CONSTRAINT block_is_locatable CHECK (
+        (x0 IS NOT NULL AND page_no IS NOT NULL) OR char_start IS NOT NULL
+    )
 );
 
 CREATE INDEX blocks_doc_order_idx ON blocks (document_id, page_no, reading_order);
@@ -163,8 +199,11 @@ CREATE TABLE chunks (
     context_prefix TEXT,
     token_count    INT  NOT NULL,
     section_path   TEXT[] NOT NULL DEFAULT '{}',
-    page_from      INT  NOT NULL,
-    page_to        INT  NOT NULL,
+    -- Paged documents fill the page range, flow documents the char range.
+    page_from      INT,
+    page_to        INT,
+    char_start     INT,
+    char_end       INT,
     tsv            tsvector GENERATED ALWAYS AS (
                        to_tsvector('english', coalesce(context_prefix,'') || ' ' || text)
                    ) STORED,
@@ -218,13 +257,20 @@ CREATE TABLE citations (
     marker      INT  NOT NULL,          -- the [1] in the answer text
     chunk_id    UUID NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
     document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    page_no     INT  NOT NULL,
-    -- union of the cited chunk block bboxes, precomputed for the viewer
-    bboxes      JSONB NOT NULL,
+    -- Paged: page plus the union of the cited chunk's block bboxes,
+    -- precomputed so the viewer never re-derives a highlight.
+    page_no     INT,
+    bboxes      JSONB,
+    -- Flow: the character range the viewer highlights instead.
+    char_start  INT,
+    char_end    INT,
     quote       TEXT,
     -- verifier score: did this claim actually follow from this chunk?
     grounding   REAL,
-    UNIQUE (message_id, marker)
+    UNIQUE (message_id, marker),
+    CONSTRAINT citation_is_locatable CHECK (
+        (page_no IS NOT NULL AND bboxes IS NOT NULL) OR char_start IS NOT NULL
+    )
 );
 
 -- ---------------------------------------------------------------- triggers

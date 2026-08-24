@@ -1,4 +1,9 @@
-FROM python:3.12-slim
+# Multi-stage so the convert worker can add LibreOffice without every other
+# service paying for it. One Dockerfile, two targets, no cross-image build
+# ordering to get wrong.
+
+# --------------------------------------------------------------- base
+FROM python:3.12-slim AS base
 
 # System deps for PDF rasterising and OCR. Kept explicit rather than pulling a
 # fat prebuilt image so the build stays auditable.
@@ -23,3 +28,23 @@ COPY ragent ./ragent
 COPY evals ./evals
 
 CMD ["uvicorn", "ragent.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# --------------------------------------------------------------- convert
+# Only the `convert` stage needs LibreOffice, and it costs roughly half a
+# gigabyte. Baking it into `base` would make the API, both worker pools and CI
+# carry a dependency none of them ever call.
+FROM base AS convert
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libreoffice-writer \
+        libreoffice-calc \
+        libreoffice-impress \
+        fonts-liberation \
+        fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# LibreOffice will not start headless without a writable profile directory.
+ENV HOME=/tmp/lo-profile
+RUN mkdir -p /tmp/lo-profile
+
+CMD ["python", "-m", "ragent.workers.run", "--queues", "convert"]

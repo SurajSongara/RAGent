@@ -1,8 +1,9 @@
 # RAGent
 
-Document intelligence over SEC filings. Async ingest pipeline, hybrid retrieval,
-answers whose every citation highlights the exact region of the source page it
-came from, and an MCP interface in both directions.
+Document intelligence over SEC filings and whatever else you throw at it —
+PDFs, scans and images, Office documents, HTML, plain text. Async ingest
+pipeline, hybrid retrieval, answers whose every citation resolves back to the
+exact spot in the source it came from, and an MCP interface in both directions.
 
 > **Status: in development.** The data model, stack topology and the core
 > ingest primitives are in place and unit tested. The stages that wire them
@@ -25,9 +26,11 @@ citation precision, run in CI as a regression gate. Every claim in the docs is
 backed by a number the harness produced.
 
 **2. Citations you can see.** Ask a question, get an answer, click a citation, and
-the original PDF page renders with the exact bounding box highlighted. That
-requires carrying `page + bbox` provenance intact through OCR, chunking,
-embedding, retrieval, and generation without dropping it anywhere.
+the original page renders with the exact bounding box highlighted. That requires
+carrying `page + bbox` provenance intact through OCR, chunking, embedding,
+retrieval, and generation without dropping it anywhere. Formats with no pages to
+highlight — Markdown, CSV, plain text — carry character offsets instead, because
+two honest provenance modes beat one that fabricates coordinates.
 
 **3. Benchmarked decisions, not asserted ones.** Four chunking strategies are
 implemented and indexed side by side over the same corpus. `make bench` runs them
@@ -71,6 +74,21 @@ make seed                 # pulls the demo EDGAR corpus and ingests it
 What was deliberately left out, and why, is in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#deliberate-exclusions).
 
+## Supported formats
+
+Detection leads with magic bytes, never the extension — users rename files, and
+scanners emit `.tif` files that are really JPEGs. The detected **family** picks
+the route through the ingest DAG.
+
+| Family | Formats | Route |
+|---|---|---|
+| **PDF** | `.pdf` | Parsed natively; only low-confidence pages get OCRed |
+| **Image** | `.png` `.jpg` `.tiff` `.gif` `.bmp` `.webp` | No text layer exists, so always OCR |
+| **Office** | `.docx` `.xlsx` `.pptx` `.doc` `.xls` `.ppt` `.odt` `.ods` `.odp` `.rtf` | Converted to PDF, then the PDF route |
+| **Web** | `.html` `.htm` | Rendered to PDF, then the PDF route |
+| **Flow** | `.md` `.txt` `.csv` `.tsv` `.json` `.xml` | No pages or geometry; character-offset provenance |
+
+
 ## Roadmap
 
 **Phase 1 — Foundation**
@@ -78,8 +96,11 @@ What was deliberately left out, and why, is in
 - [x] Stack topology, healthchecked one-command bring-up
 - [x] Ingest primitives: selective-OCR gate, PDF coordinate conversion, financial cell parsing, four chunking strategies
 - [x] Reciprocal Rank Fusion
-- [ ] Ingest DAG wiring: RabbitMQ topology, stage consumers, DLQs, resume-on-crash
-- [ ] Parse stage: Docling layout extraction, table cells, figure captioning
+- [x] Format detection and routing: PDF, images, Office, HTML, flow text
+- [x] Ingest DAG: conditional per-format graph, scheduler, retry/DLQ policy, resume-on-crash
+- [x] RabbitMQ topology and the stage consumer
+- [ ] Stage handlers: Docling layout extraction, selective OCR, table cells, figure captioning
+- [ ] Postgres-backed stage store (the consumer's store protocol is already in place)
 - [ ] Retrievers: Qdrant dense + Postgres lexical, cross-encoder rerank
 - [ ] Chat API with inline citations
 - [ ] Web UI with PDF.js bbox highlighting

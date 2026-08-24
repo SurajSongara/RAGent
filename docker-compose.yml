@@ -108,7 +108,7 @@ services:
     ports: ["16686:16686", "4317:4317"]
 
   api:
-    build: {context: ., dockerfile: infra/Dockerfile.python}
+    build: {context: ., dockerfile: infra/Dockerfile.python, target: base}
     command: uvicorn ragent.api.main:app --host 0.0.0.0 --port 8000 --reload
     environment: *python-env
     ports: ["8000:8000"]
@@ -124,8 +124,8 @@ services:
   # slow, embedding is batch-friendly, and the LLM stages are latency-bound and
   # rate-limited. They scale on different axes, so they get different consumers.
   worker-parse:
-    build: {context: ., dockerfile: infra/Dockerfile.python}
-    command: python -m ragent.workers.run --queues parse,ocr,tables --concurrency 2
+    build: {context: ., dockerfile: infra/Dockerfile.python, target: base}
+    command: python -m ragent.workers.run --queues detect,parse,parse_flow,ocr,tables
     environment: *python-env
     volumes: ["./ragent:/app/ragent"]
     depends_on:
@@ -133,9 +133,20 @@ services:
     deploy:
       replicas: 2
 
+  # Its own image and its own replica count: LibreOffice is heavy, single
+  # threaded, and the flakiest thing in the stack. Isolating it means a hung
+  # conversion cannot take parsing down with it.
+  worker-convert:
+    build: {context: ., dockerfile: infra/Dockerfile.python, target: convert}
+    command: python -m ragent.workers.run --queues convert
+    environment: *python-env
+    volumes: ["./ragent:/app/ragent"]
+    depends_on:
+      api: {condition: service_started}
+
   worker-enrich:
-    build: {context: ., dockerfile: infra/Dockerfile.python}
-    command: python -m ragent.workers.run --queues figures,chunk,contextualize,embed --concurrency 4
+    build: {context: ., dockerfile: infra/Dockerfile.python, target: base}
+    command: python -m ragent.workers.run --pool enrich
     environment: *python-env
     volumes: ["./ragent:/app/ragent"]
     depends_on:

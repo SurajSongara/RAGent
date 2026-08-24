@@ -15,26 +15,41 @@ question a reviewer is actually asking.
 ## 1. Ingest plane
 
 ```
-upload ──► MinIO (raw) ──► RabbitMQ topic exchange `ragent.ingest`
-                                      │
-   classify ──► parse ──► ocr? ──► tables ──► figures ──► chunk ──► contextualize ──► embed
-                                      │
-                            DAG state in Postgres (ingest_runs / ingest_stages)
-                                      │
-                            progress ──► Valkey pub/sub ──► SSE ──► live UI
+upload -> MinIO (raw) -> RabbitMQ topic exchange `ragent.ingest`
+
+    detect -+- OFFICE / WEB -> convert -+
+            |                           +-> parse -> ocr -+-> tables --+
+            +- PDF / IMAGE -------------+                 +-> figures -+
+            |                                                          |
+            +- FLOW -> parse_flow ------------------------------------>+
+                                                                       |
+                            chunk -> contextualize -> embed <----------+
+
+    DAG state in Postgres (ingest_runs / ingest_stages)
+    progress -> Valkey pub/sub -> SSE -> live UI
 ```
 
-Each stage is an idempotent consumer with its own queue, retry policy, and dead
-letter queue. Per-document DAG state lives in `ingest_stages`, so a worker crash
-resumes mid-pipeline rather than re-OCRing 200 pages.
+Formats do not share one linear pipeline, so the graph is conditional. The
+mechanism that keeps that from becoming a mess of `if family ==` checks: a stage
+declares every predecessor it *could* have, and the scheduler intersects those
+with the stages that actually apply to this document's family. `parse` depends
+on `convert`; for a PDF, where `convert` never runs, that dependency simply
+disappears instead of deadlocking.
 
-Three decisions here are the ones worth defending in an interview:
+Each stage is an idempotent consumer with its own queue, prefetch, retry policy
+and dead-letter queue. Per-document DAG state lives in `ingest_stages`, so
+resuming a crashed run is just asking the scheduler what is ready given what
+finished — no separate recovery path, and no re-OCRing 200 pages because a
+worker died on page 3.
+
+Four decisions here are the ones worth defending in an interview:
 
 **Selective OCR.** Naive pipelines rasterise and OCR every page. A born-digital
 10-K already has a perfect text layer; re-OCRing it *destroys* accuracy while
-burning minutes per document. We score the embedded text layer per page, and
-only OCR regions that fall below `OCR_CONFIDENCE_THRESHOLD`. Scanned exhibits get
-the full treatment; the other 95% of pages do not.
+burning minutes per document. We score the embedded text layer per page and only
+OCR regions below `OCR_CONFIDENCE_THRESHOLD`. Scanned exhibits get the full
+treatment; the other 95% of pages do not. Images skip the gate entirely — they
+have no text layer to score.
 
 **Tables as cells, not markdown.** The common shortcut is to flatten a table into
 a pipe-delimited blob inside a chunk and hope the model reads it back correctly.
@@ -43,11 +58,21 @@ parenthesised negatives, "in thousands except per share" units. We extract to
 `doc_tables` / `table_cells` with `numeric_value` parsed once at ingest, so
 numeric questions resolve against typed data.
 
-**Contextual retrieval.** Before embedding, each chunk gets a one-line preamble
-locating it in the document ("From Apple's FY2025 10-K, Item 7 MD&A, discussing
-services gross margin"). Embedded *with* the chunk, displayed *without* it. This
-is a cheap, large recall win on corpora where chunks are individually ambiguous —
-and Phase 2 measures exactly how large rather than asserting it.
+**Two provenance modes.** Paged sources carry `page_no` plus a normalised bbox,
+and the viewer draws a highlight. Flow sources — Markdown, CSV, plain text — have
+no pages and no geometry, so they carry character offsets and the viewer
+highlights a text range. The alternative was to lay flow text out onto synthetic
+pages so that everything had a bbox, which would mean fabricating coordinates
+that correspond to nothing. The `block_is_locatable` constraint enforces that
+every block does one or the other.
+
+**Retry topology.** Transient failures go to a delay tier and come back;
+permanent ones (encrypted PDF, unsupported content, malformed message) go
+straight to the DLQ, because an encrypted PDF is still encrypted in five minutes
+and burning three attempts to rediscover that only delays the operator seeing it.
+Delayed messages must return to their *own* stage queue, and
+`x-dead-letter-routing-key` is fixed per queue, so there is one retry exchange
+per delay tier and the message keeps its original routing key throughout.
 
 ## 2. Retrieval plane
 
@@ -127,16 +152,22 @@ independently.
 The load-bearing invariant:
 
 ```
-documents ──► pages ──► blocks (bbox, normalised 0..1)
+documents ──► pages ──► blocks ──► chunk_blocks ──► chunks ──► citations
                           │
-                    chunk_blocks
-                          │
-                       chunks ──► citations ──► the highlight in the viewer
+              paged: page_no + normalised bbox   ──► highlight a region
+              flow:  char_start / char_end       ──► highlight a text range
 ```
 
-Every generated sentence resolves to a pixel region of a source page. Any change
-that breaks a link in that chain is a bug, regardless of what it improves.
-bboxes are normalised against page dimensions so the viewer highlights correctly
-at any zoom without knowing the render scale.
+Every generated sentence resolves back to its exact location in the source. Any
+change that breaks a link in that chain is a bug, regardless of what it improves.
+
+Which of the two locators a block carries depends on its format family, and the
+`block_is_locatable` CHECK constraint enforces that it carries one of them. A
+block that can name neither a region nor a range is unciteable, and the database
+refuses to store it rather than letting it surface later as a citation pointing
+nowhere.
+
+bboxes are normalised 0..1 against page dimensions so the viewer highlights
+correctly at any zoom without knowing the scale the page was rendered at.
 
 See [`infra/postgres/init.sql`](../infra/postgres/init.sql).
