@@ -1,0 +1,43 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# node / next
+node_modules/
+web/.next/
+web/out/
+.turbo/
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# data & artifacts
+data/
+corpus/
+*.pdf
+!evals/golden/**/*.pdf
+.minio/
+pgdata/
+qdrant_storage/
+
+# eval output
+evals/runs/
+*.duckdb
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
