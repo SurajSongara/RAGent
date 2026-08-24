@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The unit-tested modules are deliberately dependency-free: chunking,
+      # bbox maths, cell parsing and rank fusion import nothing but the stdlib.
+      # That keeps this job at a few seconds instead of building onnxruntime,
+      # and it is a design constraint worth preserving — the logic worth testing
+      # should not need infrastructure to exercise.
+      - name: Install tools
+        run: pip install ruff==0.15.20 pytest==8.3.4 pytest-asyncio==0.24.0
+
+      - name: Lint
+        run: ruff check ragent tests
+
+      - name: Format check
+        run: ruff format --check ragent tests
+
+      - name: Test
+        run: pytest -q

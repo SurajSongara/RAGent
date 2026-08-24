@@ -4,8 +4,9 @@ Document intelligence over SEC filings. Async ingest pipeline, hybrid retrieval,
 answers whose every citation highlights the exact region of the source page it
 came from, and an MCP interface in both directions.
 
-> **Status: in development.** The data model and stack topology are in place.
-> The pipeline stages are being built now — see [Roadmap](#roadmap) for what
+> **Status: in development.** The data model, stack topology and the core
+> ingest primitives are in place and unit tested. The stages that wire them
+> together are being built now — see [Roadmap](#roadmap) for what
 > actually runs today. Nothing below is claimed to work until its box is ticked.
 
 ---
@@ -75,8 +76,11 @@ What was deliberately left out, and why, is in
 **Phase 1 — Foundation**
 - [x] Data model with end-to-end bbox provenance
 - [x] Stack topology, healthchecked one-command bring-up
-- [ ] Async ingest DAG: classify → parse → selective OCR → tables → figures → chunk → contextualize → embed
-- [ ] Hybrid retrieval: Qdrant + Postgres lexical, RRF fusion, cross-encoder rerank
+- [x] Ingest primitives: selective-OCR gate, PDF coordinate conversion, financial cell parsing, four chunking strategies
+- [x] Reciprocal Rank Fusion
+- [ ] Ingest DAG wiring: RabbitMQ topology, stage consumers, DLQs, resume-on-crash
+- [ ] Parse stage: Docling layout extraction, table cells, figure captioning
+- [ ] Retrievers: Qdrant dense + Postgres lexical, cross-encoder rerank
 - [ ] Chat API with inline citations
 - [ ] Web UI with PDF.js bbox highlighting
 
