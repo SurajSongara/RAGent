@@ -165,7 +165,9 @@ class StageConsumer:
 async def serve(stages: tuple[Stage, ...]) -> None:
     import aio_pika
 
-    from ragent.pipeline.store import InMemoryStageStore
+    # Importing the package is what populates the handler registry.
+    import ragent.ingest.stages  # noqa: F401
+    from ragent.pipeline.store_pg import PostgresStageStore
 
     settings = get_settings()
     validate_pipeline()
@@ -175,10 +177,7 @@ async def serve(stages: tuple[Stage, ...]) -> None:
     await declare(setup_channel)
     await setup_channel.close()
 
-    # TODO(phase-1): swap for the Postgres-backed store once `ingest_stages`
-    # persistence lands with the parse stage. The protocol is already the one
-    # the consumer uses, so this is a one-line change.
-    store = InMemoryStageStore()
+    store = PostgresStageStore()
 
     consumers = [StageConsumer(connection, store, stage) for stage in stages]
     for consumer in consumers:

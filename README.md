@@ -45,7 +45,7 @@ redistribute — so the eval is objective rather than vibes.
 ```bash
 cp .env.example .env      # works with no API keys: EMBEDDING_BACKEND=local
 make up                   # brings up the full stack, waits until healthy
-make seed                 # pulls the demo EDGAR corpus and ingests it
+make seed                 # ingests the demo corpus
 ```
 
 | | |
@@ -57,22 +57,6 @@ make seed                 # pulls the demo EDGAR corpus and ingests it
 | Traces | http://localhost:16686 |
 
 `make help` lists everything else.
-
-## Stack
-
-| | | |
-|---|---|---|
-| **Postgres** | System of record, lexical index, extracted tables, agent checkpoints | Earns its place four times over |
-| **Qdrant** | Dense vectors with payload filters | Filtered ANN, not fetch-and-rerank |
-| **Valkey** | Semantic cache, SSE pub/sub, rate limits, locks | |
-| **RabbitMQ** | Per-stage queues with DLQs | Right tool for a multi-stage DAG |
-| **MinIO** | Raw PDFs and page renders | S3-compatible |
-| **LangGraph** | Agent loop, checkpointed to Postgres | Cyclic and stateful, so it earns the dependency |
-| **FastAPI + SSE** | Streaming tokens and live pipeline progress | |
-| **Next.js** | Chat, PDF.js citation viewer, pipeline view, eval dashboard | |
-
-What was deliberately left out, and why, is in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#deliberate-exclusions).
 
 ## Supported formats
 

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     embedding_backend: str = "local"
 
     model_synthesis: str = "claude-opus-5"
-    model_utility: str = "claude-haiku-4-5-20251001"
+    model_utility: str = "claude-haiku-4-5"
     model_vision: str = "claude-sonnet-5"
 
     # --- ingest ---------------------------------------------------------

@@ -98,12 +98,21 @@ def _assemble(
     text = text.strip()
     if not text or not blocks:
         return None
+
+    # Carry forward whichever provenance the source blocks actually have. A flow
+    # document has no pages to record, and inventing page 0 for it would put a
+    # meaningless number in front of every citation.
+    paged = [b for b in blocks if b.is_paged]
+    spans = [b for b in blocks if b.char_start is not None]
+
     return Chunk(
         seq=seq,
         text=text,
         block_ids=[b.id for b in blocks],
-        page_from=min(b.page_no for b in blocks),
-        page_to=max(b.page_no for b in blocks),
+        page_from=min(b.page_no for b in paged) if paged else None,
+        page_to=max(b.page_no for b in paged) if paged else None,
+        char_start=min(b.char_start for b in spans) if spans else None,  # type: ignore[type-var]
+        char_end=max(b.char_end for b in spans) if spans else None,  # type: ignore[type-var]
         token_count=count_tokens(text),
         # The deepest heading trail present wins, so a chunk spanning a heading
         # boundary is filed under the more specific section.
@@ -319,8 +328,16 @@ def _apply_text_overlap(
                 seq=cur.seq,
                 text=merged_text,
                 block_ids=block_ids,
-                page_from=min(prev.page_to, cur.page_from),
+                page_from=(
+                    min(prev.page_to, cur.page_from)
+                    if prev.page_to is not None and cur.page_from is not None
+                    else cur.page_from
+                ),
                 page_to=cur.page_to,
+                char_start=(
+                    min(prev.char_end or 0, cur.char_start) if cur.char_start is not None else None
+                ),
+                char_end=cur.char_end,
                 token_count=count_tokens(merged_text),
                 section_path=cur.section_path,
                 strategy=strategy,

@@ -13,13 +13,11 @@ dependencies = [
     "sse-starlette>=2.1",
 
     # storage
-    "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
-    "alembic>=1.14",
     "qdrant-client>=1.12",
     "redis>=5.2",
     "aio-pika>=9.5",
-    "boto3>=1.35",
+    "aioboto3>=13.2",
 
     # ingest
     "docling>=2.14",
@@ -61,6 +59,14 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# B008 flags FastAPI's Depends/File defaults, which are the framework's
+# intended idiom rather than a mutable-default bug.
+"ragent/api/*.py" = ["B008"]
+# OOXML namespace URIs are fixed-length constants; wrapping them would make
+# the fixture harder to verify against the spec, not easier to read.
+"scripts/seed_edgar.py" = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

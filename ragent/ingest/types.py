@@ -33,17 +33,34 @@ def approx_tokens(text: str) -> int:
 
 @dataclass(frozen=True, slots=True)
 class SourceBlock:
-    """One layout block on one page, with the bbox that makes it citable."""
+    """One block of a document, carrying whatever makes it citable.
+
+    Paged sources (PDF, images, converted Office files) fill `page_no` and
+    `bbox`. Flow sources (markdown, csv, plain text) have no geometry, so they
+    fill `char_start` / `char_end` instead. Exactly one of the two is required —
+    a block that can locate itself neither way is unciteable, and the database
+    refuses it via the `block_is_locatable` constraint.
+    """
 
     id: str
     page_no: int
     reading_order: int
     kind: str
     text: str
-    bbox: BBox
+    bbox: BBox | None = None
+    char_start: int | None = None
+    char_end: int | None = None
     section_path: tuple[str, ...] = ()
     confidence: float | None = None
     origin: str = "native"
+
+    def __post_init__(self) -> None:
+        if self.bbox is None and self.char_start is None:
+            raise ValueError(f"block {self.id!r} has neither a bbox nor a char range")
+
+    @property
+    def is_paged(self) -> bool:
+        return self.bbox is not None
 
     @property
     def is_atomic(self) -> bool:
@@ -76,9 +93,13 @@ class Chunk:
     seq: int
     text: str
     block_ids: list[str]
-    page_from: int
-    page_to: int
     token_count: int
+    #: Paged provenance. None for flow documents.
+    page_from: int | None = None
+    page_to: int | None = None
+    #: Flow provenance. None for paged documents.
+    char_start: int | None = None
+    char_end: int | None = None
     section_path: tuple[str, ...] = ()
     context_prefix: str | None = None
     strategy: str = "layout"
