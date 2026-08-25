@@ -84,6 +84,57 @@ container that *could* handle them would never see them.
 
 `make help` lists everything else.
 
+## OpenAI compatible, both ways
+
+**Driven by any OpenAI-compatible model.** Anthropic and OpenAI are both
+first-class, and "OpenAI-compatible" does real work here — the same code path
+reaches OpenAI, Azure OpenAI, Ollama, vLLM, Groq, Together, OpenRouter and LM
+Studio, because they differ only in `OPENAI_BASE_URL`.
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_BASE_URL=http://localhost:11434/v1   # Ollama; needs no key
+OPENAI_MODEL_SYNTHESIS=llama3.2:3b
+EMBEDDING_BACKEND=openai
+OPENAI_EMBEDDING_MODEL=nomic-embed-text
+```
+
+Embedding dimensions are discovered from the vectors, never assumed — pointing
+at a model this code has never heard of works, and a genuine mismatch against an
+existing index fails with a message that says so.
+
+**Consumed as one.** Point any OpenAI client at `http://localhost:8000/v1` and
+RAGent answers as a model, with citations attached:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
+
+r = client.chat.completions.create(
+    model="ragent-layout",
+    messages=[{"role": "user", "content": "why fuse retrieval on rank?"}],
+)
+print(r.choices[0].message.content)
+print(r.model_extra["citations"])   # page + bbox, or character range
+```
+
+That works from Open WebUI, LibreChat, Cursor, LangChain's `ChatOpenAI`, or curl.
+
+The mapping worth noticing: **the model name selects the chunking strategy.**
+
+| Model | Retrieval |
+|---|---|
+| `ragent` | the configured default |
+| `ragent-layout` | layout-aware chunks |
+| `ragent-recursive` | separator-hierarchy chunks |
+| `ragent-fixed` | structure-blind token windows |
+| `ragent-semantic` | embedding-distance chunks |
+
+So the Phase 2 bake-off is drivable from any OpenAI client — change the model in
+Open WebUI's dropdown and you are A/B testing retrieval strategies against the
+same corpus, with no bespoke UI.
+
+
 ## Supported formats
 
 Detection leads with magic bytes, never the extension — users rename files, and
@@ -109,6 +160,8 @@ the route through the ingest DAG.
 - [x] Ingest DAG: conditional per-format graph, scheduler, retry/DLQ policy, resume-on-crash
 - [x] RabbitMQ topology, stage consumer, Postgres-backed DAG state
 - [x] Hybrid retrieval: Qdrant dense + Postgres lexical, RRF fusion
+- [x] Provider abstraction: Anthropic and any OpenAI-compatible endpoint
+- [x] OpenAI-compatible server: `/v1/chat/completions`, `/v1/models`, `/v1/embeddings`
 - [x] Chat API with inline citations, streaming over SSE
 - [x] Web UI: upload, live pipeline view, citation viewer
 - [ ] Stage handlers still stubbed: OCR recognition, table structure, figure captioning

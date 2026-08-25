@@ -24,8 +24,23 @@ class Settings(BaseSettings):
     s3_bucket: str = "ragent"
 
     # --- models ---------------------------------------------------------
+    # `auto` picks whichever provider has credentials, preferring Anthropic.
+    # `none` forces the extractive fallback even when a key is present, which is
+    # what the eval harness uses to measure retrieval without generation noise.
+    llm_provider: str = "auto"  # auto | anthropic | openai | none
+
     anthropic_api_key: str = ""
     voyage_api_key: str = ""
+
+    # Any OpenAI-compatible endpoint: OpenAI, Azure OpenAI, Ollama, vLLM, Groq,
+    # Together, OpenRouter, LM Studio. Only the base URL changes.
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+
+    openai_model_synthesis: str = "gpt-4o"
+    openai_model_utility: str = "gpt-4o-mini"
+    openai_model_vision: str = "gpt-4o"
+    openai_embedding_model: str = "text-embedding-3-small"
 
     # `local` keeps the whole stack runnable with no API keys at all, which is
     # what makes `make up && make seed` work for a reviewer who just cloned this.
@@ -64,6 +79,20 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [s.strip() for s in v.split(",") if s.strip()]
         return v
+
+    @field_validator("llm_provider")
+    @classmethod
+    def _known_provider(cls, v: str) -> str:
+        allowed = {"auto", "anthropic", "openai", "none"}
+        if v.lower() not in allowed:
+            raise ValueError(f"LLM_PROVIDER must be one of {sorted(allowed)}, got {v!r}")
+        return v.lower()
+
+    @field_validator("openai_base_url")
+    @classmethod
+    def _strip_trailing_slash(cls, v: str) -> str:
+        # The SDK appends "/chat/completions"; a trailing slash produces "//".
+        return v.rstrip("/")
 
     @field_validator("ocr_confidence_threshold", "semantic_cache_threshold")
     @classmethod

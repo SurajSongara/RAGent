@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from ragent.agent.answer import answer_stream
+from ragent.api.openai_compat import router as openai_router
 from ragent.config import get_settings
 from ragent.db.pool import acquire, close_pool
 from ragent.db.repo import create_document, ensure_run, get_document, list_documents
@@ -79,6 +80,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Point any OpenAI client at /v1 and RAGent answers as if it were a model.
+app.include_router(openai_router)
+
 app.add_middleware(
     CORSMiddleware,
     # Local dev only. A hosted deployment must pin this to the real origin.
@@ -117,11 +121,21 @@ async def health() -> dict[str, Any]:
         checks["postgres"] = f"error: {exc}"
 
     from ragent.providers import llm
+    from ragent.providers.embeddings import get_embedder
+
+    try:
+        embedder = get_embedder()
+        embedding = {"backend": embedder.provider, "model": embedder.model}
+    except Exception as exc:  # noqa: BLE001
+        embedding = {"backend": settings.embedding_backend, "error": str(exc)}
 
     return {
         "status": "ok" if all(v == "ok" for v in checks.values()) else "degraded",
         "checks": checks,
         "llm_configured": llm.available(),
+        "generation": llm.describe(),
+        "embedding": embedding,
+        # Kept for the existing UI badge.
         "embedding_backend": settings.embedding_backend,
     }
 

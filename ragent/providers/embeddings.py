@@ -1,12 +1,18 @@
 """Embedding providers.
 
 `local` is the default and it matters more than it looks: it means `make up &&
-make seed` works for someone who just cloned the repo and has no API keys. A
-demo that needs a paid account before it does anything is a demo most reviewers
-never see.
+make seed` works for someone who just cloned the repo and has no API key. A demo
+that needs a paid account before it does anything is a demo most reviewers never
+see.
 
-`voyage` is the hosted upgrade for when retrieval quality is being measured
-rather than demonstrated.
+`openai` reaches any OpenAI-compatible `/embeddings` endpoint — OpenAI, Azure,
+Ollama (`nomic-embed-text`, `mxbai-embed-large`), vLLM, LM Studio — differing
+only in `OPENAI_BASE_URL`.
+
+Dimensions are *discovered*, never assumed. A hardcoded table would be wrong the
+moment someone points `OPENAI_BASE_URL` at a local server running a model this
+file has never heard of, and a silent dimension mismatch surfaces much later as
+an unhelpful Qdrant error.
 """
 
 from __future__ import annotations
@@ -17,19 +23,12 @@ from typing import Protocol
 
 from ragent.config import get_settings
 
-__all__ = ["Embedder", "get_embedder", "EMBEDDING_DIMS"]
-
-#: Qdrant collections are created with a fixed vector size, so changing the
-#: model means reindexing. Recorded here so the mismatch fails loudly.
-EMBEDDING_DIMS = {
-    "BAAI/bge-small-en-v1.5": 384,
-    "voyage-3": 1024,
-}
+__all__ = ["Embedder", "get_embedder"]
 
 
 class Embedder(Protocol):
     model: str
-    dims: int
+    provider: str
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
     async def embed_query(self, text: str) -> list[float]: ...
@@ -38,8 +37,8 @@ class Embedder(Protocol):
 class LocalEmbedder:
     """fastembed, running in-process on CPU. No network, no key."""
 
+    provider = "local"
     model = "BAAI/bge-small-en-v1.5"
-    dims = EMBEDDING_DIMS["BAAI/bge-small-en-v1.5"]
 
     def __init__(self) -> None:
         from fastembed import TextEmbedding
@@ -61,8 +60,8 @@ class LocalEmbedder:
 
 
 class VoyageEmbedder:
+    provider = "voyage"
     model = "voyage-3"
-    dims = EMBEDDING_DIMS["voyage-3"]
 
     def __init__(self, api_key: str) -> None:
         import voyageai
@@ -72,14 +71,46 @@ class VoyageEmbedder:
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        # input_type matters: Voyage encodes documents and queries asymmetrically,
-        # and mixing the two up quietly costs recall.
+        # input_type matters: Voyage encodes documents and queries
+        # asymmetrically, and mixing the two up quietly costs recall.
         result = await self._client.embed(texts, model=self.model, input_type="document")
         return list(result.embeddings)
 
     async def embed_query(self, text: str) -> list[float]:
         result = await self._client.embed([text], model=self.model, input_type="query")
         return list(result.embeddings[0])
+
+
+class OpenAIEmbedder:
+    """Any OpenAI-compatible /embeddings endpoint."""
+
+    provider = "openai"
+
+    #: Requests are chunked because hosted endpoints cap inputs per call and
+    #: self-hosted ones fall over well before the documented limit.
+    BATCH = 96
+
+    def __init__(self, api_key: str, base_url: str, model: str) -> None:
+        import openai
+
+        self.model = model
+        self._client = openai.AsyncOpenAI(api_key=api_key or "not-needed", base_url=base_url)
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        out: list[list[float]] = []
+        for start in range(0, len(texts), self.BATCH):
+            batch = texts[start : start + self.BATCH]
+            response = await self._client.embeddings.create(model=self.model, input=batch)
+            # Some compatible servers return data out of order; index is
+            # authoritative, position is not.
+            ordered = sorted(response.data, key=lambda d: d.index)
+            out.extend(list(d.embedding) for d in ordered)
+        return out
+
+    async def embed_query(self, text: str) -> list[float]:
+        return (await self.embed_documents([text]))[0]
 
 
 @lru_cache(maxsize=1)
@@ -95,7 +126,16 @@ def get_embedder() -> Embedder:
             )
         return VoyageEmbedder(settings.voyage_api_key)
 
+    if backend == "openai":
+        return OpenAIEmbedder(
+            settings.openai_api_key,
+            settings.openai_base_url,
+            settings.openai_embedding_model,
+        )
+
     if backend != "local":
-        raise ValueError(f"unknown EMBEDDING_BACKEND {backend!r}; expected 'local' or 'voyage'")
+        raise ValueError(
+            f"unknown EMBEDDING_BACKEND {backend!r}; expected 'local', 'openai' or 'voyage'"
+        )
 
     return LocalEmbedder()

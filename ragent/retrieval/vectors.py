@@ -19,7 +19,14 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 
 from ragent.config import get_settings
 
-__all__ = ["collection_for", "ensure_collection", "upsert_chunks", "search", "delete_document"]
+__all__ = [
+    "collection_for",
+    "ensure_collection",
+    "upsert_chunks",
+    "search",
+    "delete_document",
+    "DimensionMismatch",
+]
 
 
 def collection_for(strategy: str) -> str:
@@ -36,17 +43,35 @@ def get_client() -> AsyncQdrantClient:
     return _client
 
 
+class DimensionMismatch(RuntimeError):
+    """Existing collection was built for a different embedding model."""
+
+
 async def ensure_collection(strategy: str, dims: int) -> None:
-    """Create the collection if it is missing. Safe to call concurrently.
+    """Create the collection if missing. Safe to call concurrently.
 
     check-then-create is a race: several embed workers finish their first
     document at roughly the same time, all see no collection, and all try to
     create it. Losing that race is not an error — the collection exists, which
     is the postcondition — so a 409 is swallowed rather than retried.
+
+    A size mismatch, on the other hand, is fatal and worth saying plainly.
+    Switching embedding model changes the vector width, and Qdrant would
+    otherwise reject every upsert with a message that says nothing about the
+    actual cause.
     """
     client = get_client()
     name = collection_for(strategy)
+
     if await client.collection_exists(name):
+        info = await client.get_collection(name)
+        existing = info.config.params.vectors.size  # type: ignore[union-attr]
+        if existing != dims:
+            raise DimensionMismatch(
+                f"collection {name!r} holds {existing}-dim vectors but the current "
+                f"embedding model produces {dims}. Re-index with `make reset`, or "
+                f"point EMBEDDING_BACKEND back at the model that built it."
+            )
         return
 
     try:
@@ -58,17 +83,6 @@ async def ensure_collection(strategy: str, dims: int) -> None:
         if exc.status_code != HTTPStatus.CONFLICT:
             raise
         return  # another worker got there first
-    # Unindexed payload fields still filter correctly but scan; these four are
-    # the ones every comparison query touches.
-    for field, schema in (
-        ("tenant_id", models.PayloadSchemaType.KEYWORD),
-        ("document_id", models.PayloadSchemaType.KEYWORD),
-        ("cik", models.PayloadSchemaType.KEYWORD),
-        ("fiscal_year", models.PayloadSchemaType.INTEGER),
-    ):
-        await client.create_payload_index(
-            collection_name=name, field_name=field, field_schema=schema
-        )
 
 
 async def upsert_chunks(

@@ -161,11 +161,6 @@ async def embed_stage(message: StageMessage) -> dict[str, Any]:
             if not chunks:
                 continue
 
-            await vectors.ensure_collection(strategy, embedder.dims)
-            # Clear first so a re-ingest cannot leave points behind for chunks
-            # that no longer exist.
-            await vectors.delete_document(strategy, message.document_id)
-
             texts = [
                 Chunk(
                     seq=c["seq"],
@@ -177,6 +172,17 @@ async def embed_stage(message: StageMessage) -> dict[str, Any]:
                 for c in chunks
             ]
             embeddings = await embedder.embed_documents(texts)
+            if not embeddings:
+                continue
+
+            # Dimensions are read off the vectors rather than declared. Any
+            # OpenAI-compatible endpoint may serve a model this code has never
+            # heard of, and guessing its width would fail much later with a far
+            # less useful error.
+            await vectors.ensure_collection(strategy, len(embeddings[0]))
+            # Clear first so a re-ingest cannot leave points behind for chunks
+            # that no longer exist.
+            await vectors.delete_document(strategy, message.document_id)
 
             payloads = [
                 {
@@ -207,8 +213,8 @@ async def embed_stage(message: StageMessage) -> dict[str, Any]:
             "type": "stage",
             "stage": "embed",
             "status": "succeeded",
-            "detail": f"{total} vectors ({embedder.model})",
+            "detail": f"{total} vectors ({embedder.provider}/{embedder.model})",
         },
     )
     await publish(message.document_id, {"type": "ready"})
-    return {"vectors": total, "model": embedder.model, "dims": embedder.dims}
+    return {"vectors": total, "model": embedder.model, "provider": embedder.provider}

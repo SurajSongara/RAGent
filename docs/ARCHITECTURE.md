@@ -123,8 +123,26 @@ Jaeger. Per-message token and cost accounting lands in `messages`, so the model
 router's decisions are auditable after the fact instead of asserted in a README.
 
 Routing is task-tier based: a cheap model grades relevance and classifies, a
-strong model synthesises, a vision model captions figures. Provider errors fall
-back down the tier.
+strong model synthesises, a vision model captions figures. That tiering is
+independent of *which provider* serves it — Anthropic and any OpenAI-compatible
+endpoint are both first-class, selected by `LLM_PROVIDER`, with `auto` picking
+whichever has credentials.
+
+Supporting the OpenAI wire format is one integration that buys OpenAI, Azure
+OpenAI, Ollama, vLLM, Groq, Together, OpenRouter and LM Studio, since they differ
+only in base URL. Practically that means a reviewer can run the whole system
+against a local Ollama with no account anywhere, and the project is not an
+advertisement for a single vendor.
+
+Costs are reported, never guessed. A model absent from the price table bills as
+zero and is flagged `priced: false` — a self-hosted Llama has no list price, and
+inventing one would make the cost dashboard lie.
+
+The same compatibility runs outbound: `/v1/chat/completions`, `/v1/models` and
+`/v1/embeddings` let any OpenAI client consume RAGent as a model. The model name
+selects the chunking strategy (`ragent-layout`, `ragent-semantic`, …), which
+makes the Phase 2 bake-off drivable from Open WebUI's model dropdown rather than
+needing a purpose-built comparison UI.
 
 ---
 

@@ -84,8 +84,9 @@ def _extractive_answer(question: str, passages: list[Passage]) -> str:
         return "No passages in the indexed corpus match that question."
 
     lines = [
-        "_No `ANTHROPIC_API_KEY` is configured, so this is the retrieved evidence "
-        "rather than a written answer. Retrieval, ranking and citations are live._",
+        "_No model provider is configured, so this is the retrieved evidence rather "
+        "than a written answer. Retrieval, ranking and citations are live. Set "
+        "`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for a written one._",
         "",
     ]
     for i, passage in enumerate(passages, start=1):
@@ -133,10 +134,12 @@ async def answer_stream(question: str, passages: list[Passage]) -> AsyncIterator
             "usage",
             data={
                 "model": usage.model,
+                "provider": usage.provider,
                 "input_tokens": usage.input_tokens,
                 "output_tokens": usage.output_tokens,
                 "latency_ms": usage.latency_ms,
                 "cost_usd": round(usage.cost_usd, 6),
+                "priced": usage.priced,
             },
         )
     yield AnswerChunk("done")
