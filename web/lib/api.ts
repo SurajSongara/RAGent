@@ -89,9 +89,13 @@ export function streamEvents(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      // Normalise line endings before anything else. The SSE spec allows CRLF,
+      // LF or bare CR as a line terminator, and sse-starlette emits CRLF — so
+      // splitting on "\n\n" alone never matches the "\r\n\r\n" separator, the
+      // buffer grows without bound and not a single frame is ever dispatched.
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
 
-      // SSE frames are separated by a blank line; a partial frame stays in the
+      // Frames are separated by a blank line; a partial frame stays in the
       // buffer until its terminator arrives.
       const frames = buffer.split("\n\n");
       buffer = frames.pop() ?? "";
@@ -100,6 +104,9 @@ export function streamEvents(
         let event = "message";
         const dataLines: string[] = [];
         for (const line of frame.split("\n")) {
+          // ":" lines are comments — sse-starlette uses them for keep-alive
+          // pings, and they carry no data.
+          if (line.startsWith(":")) continue;
           if (line.startsWith("event:")) event = line.slice(6).trim();
           else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
         }

@@ -93,6 +93,16 @@ class StageMessage:
             meta=meta,
         )
 
+    def with_family(self, family: FormatFamily) -> StageMessage:
+        """Correct the family once `detect` has actually read the bytes.
+
+        The upload endpoint cannot know the format before detection runs, so it
+        publishes a provisional one. Everything downstream routes on this field,
+        so it has to be replaced with the real value before the first handoff —
+        otherwise a Markdown file follows the PDF path and fails in the parser.
+        """
+        return replace(self, family=family)
+
     def for_stage(self, stage: str) -> StageMessage:
         """Hand off to the next stage, resetting the attempt counter.
 

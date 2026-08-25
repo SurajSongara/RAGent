@@ -181,12 +181,12 @@ async def push(client: httpx.AsyncClient, name: str, data: bytes, mime: str) -> 
         )
         response.raise_for_status()
     except httpx.HTTPError as exc:
-        print(f"  ✗ {name}: {exc}")
+        print(f"  FAIL {name}: {exc}")
         return
 
     payload = response.json()
-    marker = "•" if payload.get("status") == "duplicate" else "✓"
-    print(f"  {marker} {name} ({payload.get('status')}) {payload.get('document_id', '')}")
+    marker = "dup " if payload.get("status") == "duplicate" else "ok  "
+    print(f"  [{marker}] {name} ({payload.get('status')}) {payload.get('document_id', '')}")
 
 
 async def fetch_edgar(client: httpx.AsyncClient) -> list[tuple[str, bytes, str]]:
@@ -198,7 +198,7 @@ async def fetch_edgar(client: httpx.AsyncClient) -> list[tuple[str, bytes, str]]
             )
             response.raise_for_status()
             out.append((name, response.content, "text/html"))
-            print(f"  ↓ {name} ({len(response.content) // 1024} KB)")
+            print(f"  get  {name} ({len(response.content) // 1024} KB)")
         except httpx.HTTPError as exc:
             print(f"  ! skipping {name}: {exc}")
     return out
@@ -215,8 +215,8 @@ async def main(local_only: bool) -> int:
 
         info = health.json()
         print(
-            f"API ready · embeddings={info.get('embedding_backend')} "
-            f"· llm={'yes' if info.get('llm_configured') else 'no key'}\n"
+            f"API ready | embeddings={info.get('embedding_backend')} "
+            f"| llm={'yes' if info.get('llm_configured') else 'no key'}\n"
         )
 
         print("Local fixtures (one per format family):")

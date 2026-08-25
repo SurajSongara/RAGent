@@ -5,12 +5,20 @@ description = "Document intelligence over SEC filings: async ingest, hybrid retr
 requires-python = ">=3.12"
 
 dependencies = [
+    # Only what is actually imported. Heavier libraries arrive with the stage
+    # that needs them — docling and rapidocr with layout analysis and OCR,
+    # langgraph and mcp with the agent plane, opentelemetry with tracing.
+    # Declaring them early would put minutes of onnxruntime build into every
+    # `make install` for code that does not exist yet.
+
     # api
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "sse-starlette>=2.1",
+    # Required by FastAPI for the multipart upload endpoint.
+    "python-multipart>=0.0.20",
 
     # storage
     "asyncpg>=0.30",
@@ -20,27 +28,15 @@ dependencies = [
     "aioboto3>=13.2",
 
     # ingest
-    "docling>=2.14",
     "pypdfium2>=4.30",
-    "rapidocr-onnxruntime>=1.4",
-    "pillow>=11.0",
 
     # models
     "anthropic>=0.40",
     "fastembed>=0.5",
     "voyageai>=0.3",
-    "tiktoken>=0.8",
 
-    # agent
-    "langgraph>=0.2.60",
-    "langgraph-checkpoint-postgres>=2.0",
-    "mcp>=1.2",
-
-    # observability
-    "opentelemetry-sdk>=1.29",
-    "opentelemetry-instrumentation-fastapi>=0.50b0",
-    "opentelemetry-exporter-otlp>=1.29",
-    "structlog>=24.4",
+    # seeding and health checks
+    "httpx>=0.28",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +47,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "testcontainers>=4.9",
+    "watchfiles>=1.0",
 ]
 
 [tool.ruff]
@@ -76,6 +73,11 @@ testpaths = ["tests"]
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+
+# Explicit, because auto-discovery gives up when the repo root holds several
+# top-level directories (ragent, scripts, evals, tests, web).
+[tool.setuptools.packages.find]
+include = ["ragent*", "scripts*", "evals*"]
 
 [build-system]
 requires = ["setuptools>=75"]

@@ -23,6 +23,7 @@ import signal
 from typing import Any
 
 from ragent.config import get_settings
+from ragent.ingest.formats import FormatFamily
 from ragent.pipeline.handlers import HandlerNotRegistered, get_handler
 from ragent.pipeline.messages import MalformedMessageError, StageMessage
 from ragent.pipeline.runner import DeadLetter, Retry, document_ready, next_messages, plan_failure
@@ -32,7 +33,27 @@ from ragent.pipeline.topology import DLX_EXCHANGE, INGEST_EXCHANGE, declare
 log = logging.getLogger("ragent.worker")
 
 
-def select_stages(pool: str | None, queues: str | None) -> tuple[Stage, ...]:
+def select_stages(
+    pool: str | None, queues: str | None, exclude: str | None = None
+) -> tuple[Stage, ...]:
+    """Pick the stages this process consumes.
+
+    `exclude` exists for the native dev loop: the convert stage needs
+    LibreOffice, which belongs in a container rather than on a laptop. A
+    worker that consumes a queue it cannot service is worse than one that
+    ignores it — it takes the message and fails it permanently, so the
+    container that *could* have handled it never sees it.
+    """
+    dropped = {q.strip() for q in (exclude or "").split(",") if q.strip()}
+    unknown_excludes = dropped - set(STAGES_BY_NAME)
+    if unknown_excludes:
+        raise SystemExit(f"unknown stage(s) in --exclude: {sorted(unknown_excludes)}")
+
+    selected = _selected(pool, queues)
+    return tuple(s for s in selected if s.name not in dropped)
+
+
+def _selected(pool: str | None, queues: str | None) -> tuple[Stage, ...]:
     if queues:
         wanted = [q.strip() for q in queues.split(",") if q.strip()]
         unknown = [q for q in wanted if q not in STAGES_BY_NAME]
@@ -109,6 +130,11 @@ class StageConsumer:
             except Exception as exc:  # noqa: BLE001 - the whole point is to classify it
                 await self._handle_failure(raw, message, exc)
                 return
+
+            # `detect` is the stage that discovers what the document really
+            # is; adopt its answer before scheduling anything downstream.
+            if metrics and metrics.get("family"):
+                message = message.with_family(FormatFamily(metrics["family"]))
 
             snapshot = await self._store.complete_stage(
                 message.run_id, message.stage, metrics or {}
@@ -200,6 +226,11 @@ def main() -> None:
     parser.add_argument("--pool", help=f"one of {[p.value for p in WorkerPool]}")
     parser.add_argument("--queues", help="comma-separated stage names, overrides --pool")
     parser.add_argument("--concurrency", type=int, default=1, help="asyncio tasks per stage")
+    parser.add_argument(
+        "--exclude",
+        help="comma-separated stages to skip, e.g. --exclude convert when "
+        "LibreOffice is not installed locally",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -208,7 +239,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
     )
 
-    stages = select_stages(args.pool, args.queues)
+    stages = select_stages(args.pool, args.queues, args.exclude)
     asyncio.run(serve(stages))
 
 

@@ -1,8 +1,20 @@
 name: ragent
 
-# One-command bring-up is a hard requirement: if a reviewer cannot get this
-# running in two minutes it does not exist to them. Every service here has a
-# healthcheck so `make up` blocks until the stack is actually usable.
+# Two ways to run, on purpose.
+#
+#   docker compose up -d                 infra only (postgres, qdrant, valkey,
+#                                        rabbitmq, minio, jaeger) — the default,
+#                                        because day-to-day you want the app
+#                                        running natively with hot reload and no
+#                                        image builds in the loop.
+#
+#   docker compose --profile app up -d   everything, including api/workers/web.
+#                                        This is the one-command path for anyone
+#                                        who just cloned the repo.
+#
+# App services are volume-mounted and reload on save, so even in the `app`
+# profile a code change never requires a rebuild — only a dependency change does.
+# Every service has a healthcheck so `--wait` blocks until the stack is usable.
 
 x-python-env: &python-env
   DATABASE_URL: postgresql+asyncpg://ragent:ragent@postgres:5432/ragent
@@ -102,12 +114,14 @@ services:
     restart: "no"
 
   jaeger:
+    profiles: ["app", "tracing"]
     image: jaegertracing/all-in-one:1.65
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports: ["16686:16686", "4317:4317"]
 
   api:
+    profiles: ["app"]
     build: {context: ., dockerfile: infra/Dockerfile.python, target: base}
     command: uvicorn ragent.api.main:app --host 0.0.0.0 --port 8000 --reload
     environment: *python-env
@@ -124,12 +138,20 @@ services:
   # slow, embedding is batch-friendly, and the LLM stages are latency-bound and
   # rate-limited. They scale on different axes, so they get different consumers.
   worker-parse:
+    profiles: ["app"]
     build: {context: ., dockerfile: infra/Dockerfile.python, target: base}
-    command: python -m ragent.workers.run --queues detect,parse,parse_flow,ocr,tables
+    command: >
+      watchfiles --filter python
+      "python -m ragent.workers.run --queues detect,parse,parse_flow,ocr,tables"
+      /app/ragent
     environment: *python-env
     volumes: ["./ragent:/app/ragent"]
     depends_on:
-      api: {condition: service_started}
+      postgres:  {condition: service_healthy}
+      rabbitmq:  {condition: service_healthy}
+      minio:     {condition: service_healthy}
+      qdrant:    {condition: service_healthy}
+      valkey:    {condition: service_healthy}
     deploy:
       replicas: 2
 
@@ -137,22 +159,39 @@ services:
   # threaded, and the flakiest thing in the stack. Isolating it means a hung
   # conversion cannot take parsing down with it.
   worker-convert:
+    profiles: ["app"]
     build: {context: ., dockerfile: infra/Dockerfile.python, target: convert}
-    command: python -m ragent.workers.run --queues convert
+    command: >
+      watchfiles --filter python
+      "python -m ragent.workers.run --queues convert"
+      /app/ragent
     environment: *python-env
     volumes: ["./ragent:/app/ragent"]
     depends_on:
-      api: {condition: service_started}
+      postgres:  {condition: service_healthy}
+      rabbitmq:  {condition: service_healthy}
+      minio:     {condition: service_healthy}
+      qdrant:    {condition: service_healthy}
+      valkey:    {condition: service_healthy}
 
   worker-enrich:
+    profiles: ["app"]
     build: {context: ., dockerfile: infra/Dockerfile.python, target: base}
-    command: python -m ragent.workers.run --pool enrich
+    command: >
+      watchfiles --filter python
+      "python -m ragent.workers.run --pool enrich"
+      /app/ragent
     environment: *python-env
     volumes: ["./ragent:/app/ragent"]
     depends_on:
-      api: {condition: service_started}
+      postgres:  {condition: service_healthy}
+      rabbitmq:  {condition: service_healthy}
+      minio:     {condition: service_healthy}
+      qdrant:    {condition: service_healthy}
+      valkey:    {condition: service_healthy}
 
   web:
+    profiles: ["app"]
     build: {context: ./web, dockerfile: Dockerfile}
     command: npm run dev
     environment:

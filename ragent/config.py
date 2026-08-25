@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -41,7 +42,10 @@ class Settings(BaseSettings):
     # Tuned against the golden set rather than guessed; see evals/harness.
     ocr_confidence_threshold: float = 0.72
 
-    chunk_strategies: list[str] = Field(default_factory=lambda: ["layout"])
+    # NoDecode stops pydantic-settings JSON-parsing this before the validator
+    # below runs. Without it, CHUNK_STRATEGIES=layout,recursive raises a
+    # settings error instead of being read as a comma-separated list.
+    chunk_strategies: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["layout"])
     chunk_target_tokens: int = 512
     chunk_overlap_tokens: int = 64
 

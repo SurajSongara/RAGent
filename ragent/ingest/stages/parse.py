@@ -175,7 +175,12 @@ async def parse_stage(message: StageMessage) -> dict[str, Any]:
 
     # pypdfium2 is synchronous and CPU-bound; a 200-page filing would otherwise
     # block every other consumer sharing this worker's event loop.
-    pages, blocks = await asyncio.to_thread(_extract_pdf, data)
+    try:
+        pages, blocks = await asyncio.to_thread(_extract_pdf, data)
+    except Exception as exc:
+        # Bytes that are not a readable PDF will not become one on retry.
+        # Encrypted and truncated files both land here.
+        raise PermanentError(f"cannot read as PDF: {exc}") from exc
 
     if not blocks:
         # A scan with no text layer at all is not an error — it is exactly what

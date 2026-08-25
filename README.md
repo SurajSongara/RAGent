@@ -5,10 +5,11 @@ PDFs, scans and images, Office documents, HTML, plain text. Async ingest
 pipeline, hybrid retrieval, answers whose every citation resolves back to the
 exact spot in the source it came from, and an MCP interface in both directions.
 
-> **Status: in development.** The data model, stack topology and the core
-> ingest primitives are in place and unit tested. The stages that wire them
-> together are being built now — see [Roadmap](#roadmap) for what
-> actually runs today. Nothing below is claimed to work until its box is ticked.
+> **Status: in development, but it runs.** Upload a document and it goes
+> through the full pipeline to a cited, clickable answer. Three stages are
+> still stubs — OCR recognition, table structure and figure captioning — and
+> each is marked NOT-IMPLEMENTED in the source with what it takes to finish.
+> See [Roadmap](#roadmap); nothing is claimed to work until its box is ticked.
 
 ---
 
@@ -42,11 +43,36 @@ redistribute — so the eval is objective rather than vibes.
 
 ## Quick start
 
+Two ways to run it, and the split is deliberate.
+
+**Everything in Docker** — one command from a cold clone:
+
 ```bash
 cp .env.example .env      # works with no API keys: EMBEDDING_BACKEND=local
-make up                   # brings up the full stack, waits until healthy
-make seed                 # ingests the demo corpus
+make up
+make seed
 ```
+
+**Infra in Docker, app native** — the day-to-day loop, with no image in the
+edit-run cycle:
+
+```bash
+make install              # one-time: venv + dependencies
+make dev                  # postgres, qdrant, valkey, rabbitmq, minio
+make api                  # terminal 2, reloads on save
+make worker               # terminal 3, reloads on save
+make web                  # terminal 4
+make seed
+```
+
+Both modes mount the source and reload on save, so a code change never needs a
+rebuild — only a dependency change does.
+
+One stage stays in Docker either way: `convert` needs LibreOffice, which is
+~500MB and has no business on your laptop. `make worker` skips that queue, and
+`make worker-convert` runs it in a container. Without the skip the native worker
+would take convert jobs it cannot service and fail them permanently, so the
+container that *could* handle them would never see them.
 
 | | |
 |---|---|
@@ -54,7 +80,7 @@ make seed                 # ingests the demo corpus
 | API docs | http://localhost:8000/docs |
 | Pipeline queues | http://localhost:15672 |
 | Vector store | http://localhost:6333/dashboard |
-| Traces | http://localhost:16686 |
+| Object storage | http://localhost:9001 |
 
 `make help` lists everything else.
 
@@ -77,17 +103,16 @@ the route through the ingest DAG.
 
 **Phase 1 — Foundation**
 - [x] Data model with end-to-end bbox provenance
-- [x] Stack topology, healthchecked one-command bring-up
+- [x] Stack topology, healthchecked bring-up, native dev loop
 - [x] Ingest primitives: selective-OCR gate, PDF coordinate conversion, financial cell parsing, four chunking strategies
-- [x] Reciprocal Rank Fusion
 - [x] Format detection and routing: PDF, images, Office, HTML, flow text
 - [x] Ingest DAG: conditional per-format graph, scheduler, retry/DLQ policy, resume-on-crash
-- [x] RabbitMQ topology and the stage consumer
-- [ ] Stage handlers: Docling layout extraction, selective OCR, table cells, figure captioning
-- [ ] Postgres-backed stage store (the consumer's store protocol is already in place)
-- [ ] Retrievers: Qdrant dense + Postgres lexical, cross-encoder rerank
-- [ ] Chat API with inline citations
-- [ ] Web UI with PDF.js bbox highlighting
+- [x] RabbitMQ topology, stage consumer, Postgres-backed DAG state
+- [x] Hybrid retrieval: Qdrant dense + Postgres lexical, RRF fusion
+- [x] Chat API with inline citations, streaming over SSE
+- [x] Web UI: upload, live pipeline view, citation viewer
+- [ ] Stage handlers still stubbed: OCR recognition, table structure, figure captioning
+- [ ] Cross-encoder reranking
 
 **Phase 2 — The proof**
 - [ ] Golden Q/A set over the demo corpus

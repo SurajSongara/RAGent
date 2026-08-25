@@ -7,7 +7,6 @@ back the run's progress has to be one atomic step.
 
 from __future__ import annotations
 
-import json
 import uuid
 from typing import Any
 
@@ -181,7 +180,7 @@ async def insert_pages(
         RETURNING page_no, id
         """,
         uuid.UUID(document_id),
-        json.dumps(pages),
+        pages,
     )
     return {r["page_no"]: str(r["id"]) for r in rows}
 
@@ -250,7 +249,7 @@ async def insert_blocks(
                char_start int, char_end int, text text, section_path text[])
         """,
         uuid.UUID(document_id),
-        json.dumps(payload),
+        payload,
     )
     return assigned
 
@@ -345,7 +344,7 @@ async def replace_chunks(
             """,
             uuid.UUID(document_id),
             strategy,
-            json.dumps(payload),
+            payload,
         )
 
         # The join that keeps citations resolvable. Written in the same

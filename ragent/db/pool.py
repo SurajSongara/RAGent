@@ -27,7 +27,10 @@ def _dsn() -> str:
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
     # Without this, jsonb round-trips as a string and every caller has to
-    # remember to decode it.
+    # remember to decode it. Note the consequence: callers pass *Python objects*
+    # to jsonb parameters, never pre-serialised JSON — handing this a string
+    # double-encodes it into a JSON string literal, and Postgres then rejects
+    # `jsonb_to_recordset` on what is no longer an array.
     await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
 
 

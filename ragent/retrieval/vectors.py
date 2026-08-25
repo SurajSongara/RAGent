@@ -11,9 +11,11 @@ right year survives reranking is the thing this avoids.
 
 from __future__ import annotations
 
+from http import HTTPStatus
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from ragent.config import get_settings
 
@@ -35,15 +37,27 @@ def get_client() -> AsyncQdrantClient:
 
 
 async def ensure_collection(strategy: str, dims: int) -> None:
+    """Create the collection if it is missing. Safe to call concurrently.
+
+    check-then-create is a race: several embed workers finish their first
+    document at roughly the same time, all see no collection, and all try to
+    create it. Losing that race is not an error — the collection exists, which
+    is the postcondition — so a 409 is swallowed rather than retried.
+    """
     client = get_client()
     name = collection_for(strategy)
     if await client.collection_exists(name):
         return
 
-    await client.create_collection(
-        collection_name=name,
-        vectors_config=models.VectorParams(size=dims, distance=models.Distance.COSINE),
-    )
+    try:
+        await client.create_collection(
+            collection_name=name,
+            vectors_config=models.VectorParams(size=dims, distance=models.Distance.COSINE),
+        )
+    except UnexpectedResponse as exc:
+        if exc.status_code != HTTPStatus.CONFLICT:
+            raise
+        return  # another worker got there first
     # Unindexed payload fields still filter correctly but scan; these four are
     # the ones every comparison query touches.
     for field, schema in (
