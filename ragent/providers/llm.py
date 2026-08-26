@@ -4,10 +4,11 @@ Two axes here, and they are independent.
 
 **Which provider.** Anthropic and any OpenAI-compatible endpoint are both
 first-class. "OpenAI-compatible" is doing real work in that sentence: the same
-code path reaches OpenAI, Azure OpenAI, Ollama, vLLM, Groq, Together, OpenRouter
-and LM Studio, because they all speak the same wire format and differ only in
-`OPENAI_BASE_URL`. That means the project is not an advertisement for one vendor,
-and a reviewer can run it against a local Ollama with no account at all.
+code path reaches OpenAI, Azure OpenAI, xAI (Grok), DeepSeek, Ollama, vLLM,
+Groq, Together, OpenRouter and LM Studio, because they all speak the same wire
+format and differ only in `OPENAI_BASE_URL`. That means the project is not an
+advertisement for one vendor, and a reviewer can run it against a local Ollama
+with no account at all.
 
 **Which tier.** Grading a passage for relevance and synthesising a cited answer
 are different jobs with different price/quality curves. Each tier names a model

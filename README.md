@@ -88,8 +88,9 @@ container that *could* handle them would never see them.
 
 **Driven by any OpenAI-compatible model.** Anthropic and OpenAI are both
 first-class, and "OpenAI-compatible" does real work here — the same code path
-reaches OpenAI, Azure OpenAI, Ollama, vLLM, Groq, Together, OpenRouter and LM
-Studio, because they differ only in `OPENAI_BASE_URL`.
+reaches OpenAI, Azure OpenAI, xAI (Grok), DeepSeek, Ollama, vLLM, Groq,
+Together, OpenRouter and LM Studio, because they differ only in
+`OPENAI_BASE_URL`.
 
 ```bash
 LLM_PROVIDER=openai

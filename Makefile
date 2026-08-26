@@ -98,6 +98,9 @@ eval: ## Run the golden set and print the scorecard
 bench: ## Head-to-head every chunking strategy
 	$(PY) -m evals.harness.bench --strategies all
 
+check-llm: ## Verify the configured model provider: models, completion, streaming, embeddings
+	$(PY) -m scripts.check_provider
+
 mcp: ## Print the MCP server config for Claude Desktop / Claude Code
 	$(PY) -m ragent.mcp.print_config
 

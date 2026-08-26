@@ -32,8 +32,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     voyage_api_key: str = ""
 
-    # Any OpenAI-compatible endpoint: OpenAI, Azure OpenAI, Ollama, vLLM, Groq,
-    # Together, OpenRouter, LM Studio. Only the base URL changes.
+    # Any OpenAI-compatible endpoint: OpenAI, Azure OpenAI, xAI (Grok),
+    # DeepSeek, Ollama, vLLM, Groq, Together, OpenRouter, LM Studio. Only the
+    # base URL changes.
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
 
