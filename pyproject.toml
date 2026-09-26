@@ -1,7 +1,7 @@
 [project]
 name = "ragent"
 version = "0.1.0"
-description = "Document intelligence over SEC filings: async ingest, hybrid retrieval, bbox-grounded citations, MCP both ways."
+description = "Document intelligence prototype: async ingestion, hybrid retrieval, and source-grounded citations."
 requires-python = ">=3.12"
 
 dependencies = [
@@ -68,6 +68,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
 [tool.mypy]

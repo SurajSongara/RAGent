@@ -1,45 +1,39 @@
 # RAGent
 
-Document intelligence over SEC filings and whatever else you throw at it —
-PDFs, scans and images, Office documents, HTML, plain text. Async ingest
-pipeline, hybrid retrieval, answers whose every citation resolves back to the
-exact spot in the source it came from, and an MCP interface in both directions.
+[![CI](https://github.com/SurajSongara/RAGent/actions/workflows/ci.yml/badge.svg)](https://github.com/SurajSongara/RAGent/actions/workflows/ci.yml)
 
-> **Status: in development, but it runs.** Upload a document and it goes
-> through the full pipeline to a cited, clickable answer. Three stages are
-> still stubs — OCR recognition, table structure and figure captioning — and
-> each is marked NOT-IMPLEMENTED in the source with what it takes to finish.
-> See [Roadmap](#roadmap); nothing is claimed to work until its box is ticked.
+A document intelligence prototype for asynchronous ingestion, hybrid retrieval,
+and answers with citations linked to source regions or character ranges.
+Built with Python, FastAPI, RabbitMQ, PostgreSQL, and Qdrant.
 
----
+> **Status: in development.** The ingestion and retrieval foundation is implemented.
+> OCR recognition, table structure, and figure captioning remain stubbed.
+> MCP integration, the agent loop, and the evaluation harness are planned.
+> There is no hosted demo or published retrieval-quality benchmark yet.
+
+## What works and what is planned
+
+| Area | Current status |
+|---|---|
+| Ingestion | Format routing, persistent DAG state, retries, and dead-letter handling implemented. OCR/table/figure enrichment remains unfinished. |
+| Retrieval | Dense and lexical retrieval with reciprocal-rank fusion; four chunking strategies implemented. Comparative quality results are not yet published. |
+| Answers and UI | Upload, pipeline progress, streaming responses, and source-linked citations implemented. With no model credentials, answers fall back to extracted passages. |
+| Model interface | Anthropic and OpenAI-compatible providers; OpenAI-compatible API endpoints. Individual provider deployments still need their own validation. |
+| Evaluation | Golden Q/A corpus, retrieval/generation metrics, benchmark charts, and quality regression gates planned. Current CI checks lint, formatting, and automated tests. |
+| Agents and MCP | Bidirectional MCP and a LangGraph reasoning loop planned. |
+| Operations | End-to-end OpenTelemetry coverage, cost/latency dashboard, and hosted demonstration planned. |
 
 ## Why this exists
 
-Most RAG demos are a loop over `text-embedding` + top-k + a prompt. They fall over
-on the first real document and they have no way to tell you whether a change made
-them better or worse.
+Document retrieval needs more than embedding text. This project explores
+recoverable ingestion and citations that retain their provenance through the
+pipeline. Paged documents use page and bounding-box references; flow text uses
+character ranges instead of invented page coordinates.
 
-This one is built around three things that scaffolding does not produce:
-
-**1. An eval harness with numbers.** A golden Q/A set over real filings,
-retrieval scored on recall@k / nDCG / MRR, generation scored on faithfulness and
-citation precision, run in CI as a regression gate. Every claim in the docs is
-backed by a number the harness produced.
-
-**2. Citations you can see.** Ask a question, get an answer, click a citation, and
-the original page renders with the exact bounding box highlighted. That requires
-carrying `page + bbox` provenance intact through OCR, chunking, embedding,
-retrieval, and generation without dropping it anywhere. Formats with no pages to
-highlight — Markdown, CSV, plain text — carry character offsets instead, because
-two honest provenance modes beat one that fabricates coordinates.
-
-**3. Benchmarked decisions, not asserted ones.** Four chunking strategies are
-implemented and indexed side by side over the same corpus. `make bench` runs them
-head to head and produces the chart. The winner is whichever one the data picks.
-
-The corpus is SEC filings (10-K, 10-Q, investor decks) because the answers are
-numeric and checkable, the tables are genuinely hard, and EDGAR is free to
-redistribute — so the eval is objective rather than vibes.
+SEC filings are the intended domain for the evaluation work because they contain
+checkable numerical questions and difficult tables. The next step is a versioned
+golden dataset and measured comparisons of the four chunking strategies. Those
+results are not available yet, so no strategy is presented as the winner.
 
 ## Quick start
 
@@ -136,7 +130,7 @@ Open WebUI's dropdown and you are A/B testing retrieval strategies against the
 same corpus, with no bespoke UI.
 
 
-## Supported formats
+## Format routing and limitations
 
 Detection leads with magic bytes, never the extension — users rename files, and
 scanners emit `.tif` files that are really JPEGs. The detected **family** picks
@@ -144,8 +138,8 @@ the route through the ingest DAG.
 
 | Family | Formats | Route |
 |---|---|---|
-| **PDF** | `.pdf` | Parsed natively; only low-confidence pages get OCRed |
-| **Image** | `.png` `.jpg` `.tiff` `.gif` `.bmp` `.webp` | No text layer exists, so always OCR |
+| **PDF** | `.pdf` | Native text parsing implemented. Low-confidence pages route to the unfinished OCR stage. |
+| **Image** | `.png` `.jpg` `.tiff` `.gif` `.bmp` `.webp` | Detection/routing implemented; usable text extraction is blocked on OCR recognition. |
 | **Office** | `.docx` `.xlsx` `.pptx` `.doc` `.xls` `.ppt` `.odt` `.ods` `.odp` `.rtf` | Converted to PDF, then the PDF route |
 | **Web** | `.html` `.htm` | Rendered to PDF, then the PDF route |
 | **Flow** | `.md` `.txt` `.csv` `.tsv` `.json` `.xml` | No pages or geometry; character-offset provenance |
@@ -189,7 +183,8 @@ the route through the ingest DAG.
 ## Architecture
 
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the four planes, the retrieval
-design, the MCP-in-both-directions setup, and the reasoning behind each choice.
+design, the planned MCP integration, and the reasoning behind each choice. The
+status table above and roadmap distinguish implementation from design intent.
 
 ## License
 
