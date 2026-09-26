@@ -15,13 +15,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The unit-tested modules are deliberately dependency-free: chunking,
-      # bbox maths, cell parsing and rank fusion import nothing but the stdlib.
-      # That keeps this job at a few seconds instead of building onnxruntime,
-      # and it is a design constraint worth preserving — the logic worth testing
-      # should not need infrastructure to exercise.
-      - name: Install tools
-        run: pip install ruff==0.15.20 pytest==8.3.4 pytest-asyncio==0.24.0
+      # API compatibility tests now import application modules as well as
+      # pure ingest primitives. Use the package's declared dependencies.
+      - name: Install application and test tools
+        run: python -m pip install -e ".[dev]" ruff==0.15.20 pytest==8.3.4 pytest-asyncio==0.24.0
 
       - name: Lint
         run: ruff check ragent tests
